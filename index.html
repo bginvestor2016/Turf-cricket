@@ -43,12 +43,7 @@
     font-family:'Inter',sans-serif;
     color:var(--chalk);
     min-height:100vh;
-    background:
-      repeating-linear-gradient(
-        115deg,
-        var(--turf-1) 0px, var(--turf-1) 46px,
-        var(--turf-3) 46px, var(--turf-3) 92px
-      );
+    background:linear-gradient(180deg, var(--turf-2) 0%, var(--turf-4) 100%);
     background-attachment:fixed;
   }
 
@@ -463,8 +458,8 @@
         <div class="field"><label>Team 2 name</label><input id="setupTeamB" type="text" placeholder="Team 2" maxlength="18" /></div>
       </div>
       <div class="field-row">
-        <div class="field"><label>Overs</label><input id="setupOvers" type="number" value="6" min="1" max="50" /></div>
-        <div class="field"><label>Wickets</label><input id="setupWickets" type="number" value="10" min="1" max="11" /></div>
+        <div class="field"><label>Overs</label><input id="setupOvers" type="number" value="8" min="1" max="50" /></div>
+        <div class="field"><label>Max overs/bowler</label><input id="setupMaxOvers" type="number" value="2" min="1" max="50" /></div>
       </div>
     </div>
 
@@ -552,7 +547,7 @@
         <button class="btn btn-secondary" data-run="2">2</button>
         <button class="btn btn-secondary" data-run="3">3</button>
         <button class="btn btn-secondary extra-btn" data-extra="wide">WIDE<br>+1</button>
-        <button class="btn btn-secondary extra-btn" data-extra="noball">NO BALL<br>+1</button>
+        <button class="btn btn-secondary extra-btn" id="noBallBtn">NO BALL</button>
         <button class="btn btn-secondary overthrow-btn" id="overthrowBtn">OVER<br>THROW</button>
       </div>
 
@@ -650,6 +645,39 @@
       <button id="addPlayerConfirmBtn">Add</button>
     </div>
     <button class="modal-cancel" id="addPlayerCancel">Cancel</button>
+  </div>
+</div>
+
+<!-- No-ball extra runs modal -->
+<div class="modal-overlay hidden" id="noBallOverlay">
+  <div class="modal-card">
+    <p class="modal-title">NO BALL</p>
+    <p class="modal-sub">Any runs taken off this no ball? (auto +1 penalty already included)</p>
+    <div class="dismissal-grid" id="noBallGrid">
+      <button class="dismissal-btn" data-n="0">Just nb</button>
+      <button class="dismissal-btn" data-n="1">+1</button>
+      <button class="dismissal-btn" data-n="2">+2</button>
+      <button class="dismissal-btn" data-n="3">+3</button>
+      <button class="dismissal-btn" data-n="4">+4</button>
+      <button class="dismissal-btn" data-n="6">+6</button>
+    </div>
+    <div class="picker-add-row">
+      <input id="noBallCustomInput" type="number" min="0" max="99" placeholder="Custom runs" />
+      <button id="noBallCustomAdd">Add</button>
+    </div>
+    <button class="modal-cancel" id="noBallCancel">Cancel</button>
+  </div>
+</div>
+
+<!-- Generic Yes/No confirm modal -->
+<div class="modal-overlay hidden" id="confirmOverlay">
+  <div class="modal-card">
+    <p class="modal-title" id="confirmTitle">CONFIRM</p>
+    <p class="modal-sub" id="confirmSub"></p>
+    <div class="dismissal-grid" id="confirmGrid" style="grid-template-columns:1fr 1fr;">
+      <button class="dismissal-btn" id="confirmYesBtn">Yes</button>
+      <button class="dismissal-btn" id="confirmNoBtn">No</button>
+    </div>
   </div>
 </div>
 
@@ -1067,6 +1095,14 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     await safeSet('match-history', matchHistory);
   }
 
+  function persistActiveMatch(){
+    if(!match || !inn) return;
+    safeSet('active-match', {match: match, inn: inn, savedAt: Date.now()});
+  }
+  function clearActiveMatch(){
+    try{ localStorage.removeItem('active-match'); }catch(e){}
+  }
+
   function escapeHtml(s){
     return String(s).replace(/[&<>"']/g, function(c){
       return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
@@ -1173,8 +1209,8 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     setupTeams = { A:{name:'', players:[]}, B:{name:'', players:[]} };
     document.getElementById('setupTeamA').value = '';
     document.getElementById('setupTeamB').value = '';
-    document.getElementById('setupOvers').value = 6;
-    document.getElementById('setupWickets').value = 10;
+    document.getElementById('setupOvers').value = 8;
+    document.getElementById('setupMaxOvers').value = 2;
     document.getElementById('teamAPanelTitle').textContent = 'TEAM 1 PLAYERS';
     document.getElementById('teamBPanelTitle').textContent = 'TEAM 2 PLAYERS';
     battingFirstKey = null;
@@ -1193,7 +1229,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
   document.getElementById('backFromHistoryBtn').addEventListener('click', function(){ showScreen('setup'); });
 
   /* ================= Match model ================= */
-  var match = null;   // { teamA, teamB, oversLimit, wicketsLimit, innings1, innings2 }
+  var match = null;   // { teamA, teamB, oversLimit, maxOversPerBowler, innings1, innings2 }
   var inn = null;      // active innings state
   var undoStack = [];
   var awaitingInput = false;
@@ -1207,6 +1243,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
       batStats: {}, bowlStats: {},
       battingOrderUsed: [],
       history: [],
+      soloBatting: false,
       finished: false, resultText: ''
     };
   }
@@ -1229,7 +1266,13 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
   }
 
   function oversLimitVal(){ return match.oversLimit; }
-  function wicketsLimitVal(){ return match.wicketsLimit; }
+  function maxOversPerBowlerVal(){ return match.maxOversPerBowler || 999; }
+  function squadSize(){ return (inn.battingTeamKey==='A' ? match.teamA.players.length : match.teamB.players.length); }
+  function maxWicketsVal(){ return inn.soloBatting ? squadSize() : squadSize() - 1; }
+  function bowlerOversBowled(name){
+    var s = inn.bowlStats[name];
+    return s ? Math.floor(s.balls/6) : 0;
+  }
   function oversStr(balls){ return Math.floor(balls/6) + '.' + (balls%6); }
   function crr(){
     var oversFloat = inn.balls/6;
@@ -1245,8 +1288,8 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
   document.getElementById('startMatchBtn').addEventListener('click', function(){
     var teamAName = document.getElementById('setupTeamA').value.trim() || 'Team 1';
     var teamBName = document.getElementById('setupTeamB').value.trim() || 'Team 2';
-    var oversLimit = Math.max(1, parseInt(document.getElementById('setupOvers').value || '6', 10));
-    var wicketsLimit = Math.max(1, parseInt(document.getElementById('setupWickets').value || '10', 10));
+    var oversLimit = Math.max(1, parseInt(document.getElementById('setupOvers').value || '8', 10));
+    var maxOversPerBowler = Math.max(1, parseInt(document.getElementById('setupMaxOvers').value || '2', 10));
 
     if(setupTeams.A.players.length < 2){ showToast('Add at least 2 players for '+teamAName); return; }
     if(setupTeams.B.players.length < 2){ showToast('Add at least 2 players for '+teamBName); return; }
@@ -1255,10 +1298,11 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     var team1Data = {name: teamAName, players: setupTeams.A.players.slice()};
     var team2Data = {name: teamBName, players: setupTeams.B.players.slice()};
 
+    clearActiveMatch();
     match = {
       teamA: battingFirstKey === 'A' ? team1Data : team2Data,
       teamB: battingFirstKey === 'A' ? team2Data : team1Data,
-      oversLimit: oversLimit, wicketsLimit: wicketsLimit,
+      oversLimit: oversLimit, maxOversPerBowler: maxOversPerBowler,
       innings1: null, innings2: null
     };
     rememberPlayers(match.teamA.players.concat(match.teamB.players));
@@ -1339,16 +1383,14 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
   /* ---------- scoring ---------- */
   function checkInningsEnd(){
     if(inn.finished) return;
-    var allOut = inn.wickets >= wicketsLimitVal() || inn.battingOrderUsed.length >= (inn.battingTeamKey==='A'?match.teamA.players.length:match.teamB.players.length) && inn.striker===null;
-    var noPlayersLeft = false;
-    var totalBatters = (inn.battingTeamKey==='A'?match.teamA.players.length:match.teamB.players.length);
-    if(inn.wickets >= totalBatters - 1) allOut = true;
+    var maxWkts = maxWicketsVal();
+    var allOut = inn.wickets >= maxWkts;
     var oversDone = inn.balls >= oversLimitVal()*6;
     var chased = inn.target !== null && inn.runs >= inn.target;
 
     if(chased){
       inn.finished = true;
-      var wLeft = wicketsLimitVal() - inn.wickets;
+      var wLeft = maxWkts - inn.wickets;
       inn.resultText = battingTeam().name + ' win by ' + wLeft + ' wicket' + (wLeft===1?'':'s') + '!';
       showToast('Target chased!');
     } else if(allOut || oversDone){
@@ -1366,6 +1408,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
   }
 
   function rotateStrike(){
+    if(!inn.striker || !inn.nonStriker) return;
     var t = inn.striker; inn.striker = inn.nonStriker; inn.nonStriker = t;
   }
 
@@ -1376,11 +1419,14 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
       showToast('Over ' + (inn.balls/6) + ' complete');
       var bowlTeam = (inn.battingTeamKey==='A' ? match.teamB : match.teamA);
       var prevBowler = inn.bowler;
-      var opts = bowlTeam.players.filter(function(p){ return p !== prevBowler; });
+      var cap = maxOversPerBowlerVal();
+      var opts = bowlTeam.players.filter(function(p){ return p !== prevBowler && bowlerOversBowled(p) < cap; });
+      if(opts.length === 0) opts = bowlTeam.players.filter(function(p){ return bowlerOversBowled(p) < cap; });
+      if(opts.length === 0) opts = bowlTeam.players.filter(function(p){ return p !== prevBowler; });
       if(opts.length === 0) opts = bowlTeam.players.slice();
       openPicker({
         title: 'NEXT OVER - BOWLER',
-        sub: 'Over ' + (inn.balls/6 + 1),
+        sub: 'Over ' + (inn.balls/6 + 1) + ' (max ' + cap + ' over' + (cap===1?'':'s') + '/bowler)',
         options: opts,
         onPick: function(name){
           inn.bowler = name; ensureBowlStat(name);
@@ -1399,10 +1445,33 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     var remaining = battersTeam.players.filter(function(p){ return inn.battingOrderUsed.indexOf(p) === -1; });
     if(inn.finished){ if(onDone) onDone(); return; }
     if(remaining.length === 0){
-      inn[slot] = null;
-      checkInningsEnd();
-      render();
-      if(onDone) onDone();
+      var otherSlot = slot === 'striker' ? 'nonStriker' : 'striker';
+      var stillBatting = inn[otherSlot];
+      if(stillBatting && !inn.soloBatting){
+        openConfirm({
+          title: 'LAST BATTER',
+          sub: stillBatting + ' has no partner left. Let them continue batting alone?',
+          yesLabel: 'Yes, continue',
+          noLabel: 'No, end innings',
+          onYes: function(){
+            inn.soloBatting = true;
+            inn[slot] = null;
+            render();
+            if(onDone) onDone();
+          },
+          onNo: function(){
+            inn[slot] = null;
+            checkInningsEnd();
+            render();
+            if(onDone) onDone();
+          }
+        });
+      } else {
+        inn[slot] = null;
+        checkInningsEnd();
+        render();
+        if(onDone) onDone();
+      }
       return;
     }
     openPicker({
@@ -1438,10 +1507,29 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
   function addExtra(kind){
     if(inn.finished || awaitingInput) return;
     snapshot();
-    inn.history.push({type: kind, runs:1, label: kind==='wide' ? 'wd' : 'nb', bowler: inn.bowler});
+    inn.history.push({type: kind, runs:1, label: 'wd', bowler: inn.bowler});
     inn.runs += 1;
     var bw = ensureBowlStat(inn.bowler);
     bw.runs += 1;
+    render();
+  }
+
+  function addNoBall(extraRuns){
+    if(inn.finished || awaitingInput) return;
+    if(isNaN(extraRuns) || extraRuns < 0) extraRuns = 0;
+    snapshot();
+    var total = 1 + extraRuns;
+    inn.history.push({type:'noball', runs: total, label: 'nb' + (extraRuns>0 ? '+'+extraRuns : ''), batter: inn.striker, bowler: inn.bowler});
+    inn.runs += total;
+    if(extraRuns > 0){
+      var bs = ensureBatStat(inn.striker);
+      bs.runs += extraRuns;
+      if(extraRuns===4){ inn.fours += 1; bs.fours += 1; }
+      if(extraRuns===6){ inn.sixes += 1; bs.sixes += 1; }
+    }
+    var bw = ensureBowlStat(inn.bowler);
+    bw.runs += total;
+    if(extraRuns % 2 === 1) rotateStrike();
     render();
   }
 
@@ -1570,11 +1658,12 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     var record = {
       date: new Date().toISOString(),
       teamA: match.teamA.name, teamB: match.teamB.name,
-      oversLimit: match.oversLimit, wicketsLimit: match.wicketsLimit,
+      oversLimit: match.oversLimit, maxOversPerBowler: match.maxOversPerBowler,
       innings1: match.innings1, innings2: match.innings2,
       resultText: match.resultText
     };
     saveMatchToHistory(record);
+    clearActiveMatch();
     renderSummaryScreen(record);
     showScreen('summary');
   }
@@ -1641,6 +1730,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
 
   function render(){
     if(!inn) return;
+    persistActiveMatch();
     els.inningsLabel.textContent = (inn.target === null ? '1ST' : '2ND') + ' INNINGS';
     els.battingTeamLabel.textContent = battingTeam().name + ' batting';
     els.scoreRuns.textContent = inn.runs;
@@ -1745,6 +1835,60 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
   document.querySelectorAll('.secondary-grid [data-extra]').forEach(function(btn){
     btn.addEventListener('click', function(){ addExtra(btn.getAttribute('data-extra')); });
   });
+
+  /* ---------- no-ball runs modal ---------- */
+  var noBallOverlay = document.getElementById('noBallOverlay');
+  function openNoBallModal(){
+    if(!inn || inn.finished || awaitingInput) return;
+    noBallOverlay.classList.remove('hidden');
+    awaitingInput = true;
+    updateButtonAvailability();
+  }
+  function closeNoBallModal(){
+    noBallOverlay.classList.add('hidden');
+    awaitingInput = false;
+    updateButtonAvailability();
+  }
+  document.getElementById('noBallBtn').addEventListener('click', openNoBallModal);
+  document.getElementById('noBallCancel').addEventListener('click', closeNoBallModal);
+  document.getElementById('noBallGrid').querySelectorAll('.dismissal-btn').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var n = parseInt(btn.getAttribute('data-n'),10);
+      closeNoBallModal();
+      addNoBall(n);
+    });
+  });
+  document.getElementById('noBallCustomAdd').addEventListener('click', function(){
+    var inp = document.getElementById('noBallCustomInput');
+    var n = parseInt(inp.value,10);
+    inp.value = '';
+    if(isNaN(n) || n < 0) return;
+    closeNoBallModal();
+    addNoBall(n);
+  });
+
+  /* ---------- generic Yes/No confirm modal ---------- */
+  var confirmOverlay = document.getElementById('confirmOverlay');
+  var confirmTitle = document.getElementById('confirmTitle');
+  var confirmSub = document.getElementById('confirmSub');
+  var confirmYesBtn = document.getElementById('confirmYesBtn');
+  var confirmNoBtn = document.getElementById('confirmNoBtn');
+  function openConfirm(cfg){
+    confirmTitle.textContent = cfg.title || 'CONFIRM';
+    confirmSub.textContent = cfg.sub || '';
+    confirmYesBtn.textContent = cfg.yesLabel || 'Yes';
+    confirmNoBtn.textContent = cfg.noLabel || 'No';
+    confirmOverlay.classList.remove('hidden');
+    awaitingInput = true;
+    updateButtonAvailability();
+    confirmYesBtn.onclick = function(){ closeConfirm(); if(cfg.onYes) cfg.onYes(); };
+    confirmNoBtn.onclick = function(){ closeConfirm(); if(cfg.onNo) cfg.onNo(); };
+  }
+  function closeConfirm(){
+    confirmOverlay.classList.add('hidden');
+    awaitingInput = false;
+    updateButtonAvailability();
+  }
   document.getElementById('outBtn').addEventListener('click', openModal);
   document.getElementById('modalCancel').addEventListener('click', closeModal);
   document.getElementById('dismissalGrid').querySelectorAll('.dismissal-btn').forEach(function(btn){
@@ -2105,8 +2249,31 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
   /* ================= Init ================= */
   async function init(){
     await loadStore();
-    resetSetupScreen();
-    showScreen('setup');
+    var saved = await safeGet('active-match');
+    if(saved && saved.match && saved.inn && !saved.inn.finished){
+      openConfirm({
+        title: 'RESUME MATCH?',
+        sub: 'You have an unfinished match: ' + saved.match.teamA.name + ' vs ' + saved.match.teamB.name + '. Continue where you left off?',
+        yesLabel: 'Resume',
+        noLabel: 'Discard',
+        onYes: function(){
+          match = saved.match;
+          inn = saved.inn;
+          undoStack = [];
+          showScreen('match');
+          renderMatchStatic();
+          render();
+        },
+        onNo: function(){
+          clearActiveMatch();
+          resetSetupScreen();
+          showScreen('setup');
+        }
+      });
+    } else {
+      resetSetupScreen();
+      showScreen('setup');
+    }
   }
   init();
 
