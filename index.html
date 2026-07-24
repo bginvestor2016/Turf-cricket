@@ -14,7 +14,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="Turf Score" />
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Mono:wght@500;700&family=Inter:wght@400;500;600;700&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Mono:wght@500;700&family=Inter:wght@400;500;600;700&family=Dancing+Script:wght@600;700&display=swap');
 
   :root{
     --turf-1:#2D6A4F;
@@ -329,6 +329,23 @@
   .editable-name{cursor:pointer; border-bottom:1px dashed rgba(248,249,244,0.4); padding-bottom:1px;}
   .editable-name:active{opacity:0.7;}
 
+  .app-credit{
+    text-align:center;
+    margin-top:22px;
+    padding:8px 0 4px;
+    font-family:'Inter',sans-serif;
+    font-size:11px;
+    color:rgba(248,249,244,0.28);
+    letter-spacing:0.3px;
+  }
+  .app-credit .credit-name{
+    font-family:'Dancing Script', cursive;
+    font-size:19px;
+    font-weight:700;
+    color:rgba(224,164,88,0.55);
+    margin-left:4px;
+  }
+
   /* ---------- Controls ---------- */
   .controls{margin-top:16px;}
   .primary-grid{display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;}
@@ -575,6 +592,8 @@
     <div id="historyList"></div>
     <button class="btn-block ghost" id="backFromHistoryBtn">← Back</button>
   </div>
+
+  <div class="app-credit">Designed by <span class="credit-name">Bhupendra</span></div>
 
 </div>
 
@@ -1384,7 +1403,6 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
   function checkInningsEnd(){
     if(inn.finished) return;
     var maxWkts = maxWicketsVal();
-    var allOut = inn.wickets >= maxWkts;
     var oversDone = inn.balls >= oversLimitVal()*6;
     var chased = inn.target !== null && inn.runs >= inn.target;
 
@@ -1393,7 +1411,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
       var wLeft = maxWkts - inn.wickets;
       inn.resultText = battingTeam().name + ' win by ' + wLeft + ' wicket' + (wLeft===1?'':'s') + '!';
       showToast('Target chased!');
-    } else if(allOut || oversDone){
+    } else if(oversDone){
       inn.finished = true;
       if(inn.target !== null){
         var diff = inn.target - 1 - inn.runs;
@@ -1401,10 +1419,24 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
         else if(diff > 0){ inn.resultText = bowlingTeam().name + ' win by ' + diff + ' run' + (diff===1?'':'s') + '!'; }
         else { inn.resultText = battingTeam().name + ' win!'; }
       } else {
-        inn.resultText = allOut ? 'All out.' : 'Overs complete.';
+        inn.resultText = 'Overs complete.';
       }
-      showToast(allOut ? 'All out' : (inn.target!==null ? 'Innings complete' : 'Overs complete'));
+      showToast(inn.target!==null ? 'Innings complete' : 'Overs complete');
     }
+  }
+
+  function finishAllOut(){
+    if(inn.finished) return;
+    inn.finished = true;
+    if(inn.target !== null){
+      var diff = inn.target - 1 - inn.runs;
+      if(diff === 0){ inn.resultText = 'Match tied!'; }
+      else if(diff > 0){ inn.resultText = bowlingTeam().name + ' win by ' + diff + ' run' + (diff===1?'':'s') + '!'; }
+      else { inn.resultText = battingTeam().name + ' win!'; }
+    } else {
+      inn.resultText = 'All out.';
+    }
+    showToast('All out');
   }
 
   function rotateStrike(){
@@ -1461,14 +1493,14 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
           },
           onNo: function(){
             inn[slot] = null;
-            checkInningsEnd();
+            finishAllOut();
             render();
             if(onDone) onDone();
           }
         });
       } else {
         inn[slot] = null;
-        checkInningsEnd();
+        finishAllOut();
         render();
         if(onDone) onDone();
       }
