@@ -1,4 +1,4 @@
-const CACHE_NAME = "turf-score-cache-v3";
+const CACHE_NAME = "turf-score-cache-v4";
 const ASSETS_TO_CACHE = [
   "./index.html",
   "./manifest.json",

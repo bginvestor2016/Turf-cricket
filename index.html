@@ -1444,28 +1444,55 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     var t = inn.striker; inn.striker = inn.nonStriker; inn.nonStriker = t;
   }
 
+  var bowlerPromptResume = null;
+  var addPlayerPreselectTeamKey = null;
+
+  function promptNextOverBowler(onDone){
+    var bowlTeam = (inn.battingTeamKey==='A' ? match.teamB : match.teamA);
+    var prevBowler = inn.bowler;
+    var cap = maxOversPerBowlerVal();
+    var eligible = bowlTeam.players.filter(function(p){ return p !== prevBowler && bowlerOversBowled(p) < cap; });
+    if(eligible.length === 0){
+      // Only reachable if prevBowler is literally the sole player under the cap (e.g. a 1-bowler squad)
+      var underCapAny = bowlTeam.players.filter(function(p){ return bowlerOversBowled(p) < cap; });
+      if(underCapAny.length > 0) eligible = underCapAny;
+    }
+    if(eligible.length === 0){
+      openConfirm({
+        title: 'NO BOWLER AVAILABLE',
+        sub: 'Every bowler in ' + bowlTeam.name + ' has reached the ' + cap + '-over cap. Add another bowler to continue.',
+        yesLabel: 'Add player',
+        noLabel: 'Cancel',
+        onYes: function(){
+          bowlerPromptResume = onDone;
+          addPlayerPreselectTeamKey = (inn.battingTeamKey==='A' ? 'B' : 'A');
+          openAddPlayerModal();
+        },
+        onNo: function(){
+          showToast('Add a bowler to continue the innings');
+          if(onDone) onDone();
+        }
+      });
+      return;
+    }
+    openPicker({
+      title: 'NEXT OVER - BOWLER',
+      sub: 'Over ' + (inn.balls/6 + 1) + ' (max ' + cap + ' over' + (cap===1?'':'s') + '/bowler)',
+      options: eligible,
+      onPick: function(name){
+        inn.bowler = name; ensureBowlStat(name);
+        render();
+        if(onDone) onDone();
+      }
+    });
+  }
+
   function maybePromptNextOver(onDone){
     if(inn.finished){ if(onDone) onDone(); return; }
     if(inn.balls % 6 === 0 && inn.balls > 0){
       rotateStrike();
       showToast('Over ' + (inn.balls/6) + ' complete');
-      var bowlTeam = (inn.battingTeamKey==='A' ? match.teamB : match.teamA);
-      var prevBowler = inn.bowler;
-      var cap = maxOversPerBowlerVal();
-      var opts = bowlTeam.players.filter(function(p){ return p !== prevBowler && bowlerOversBowled(p) < cap; });
-      if(opts.length === 0) opts = bowlTeam.players.filter(function(p){ return bowlerOversBowled(p) < cap; });
-      if(opts.length === 0) opts = bowlTeam.players.filter(function(p){ return p !== prevBowler; });
-      if(opts.length === 0) opts = bowlTeam.players.slice();
-      openPicker({
-        title: 'NEXT OVER - BOWLER',
-        sub: 'Over ' + (inn.balls/6 + 1) + ' (max ' + cap + ' over' + (cap===1?'':'s') + '/bowler)',
-        options: opts,
-        onPick: function(name){
-          inn.bowler = name; ensureBowlStat(name);
-          render();
-          if(onDone) onDone();
-        }
-      });
+      promptNextOverBowler(onDone);
     } else {
       if(onDone) onDone();
     }
@@ -1487,7 +1514,8 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
           noLabel: 'No, end innings',
           onYes: function(){
             inn.soloBatting = true;
-            inn[slot] = null;
+            inn.striker = stillBatting;
+            inn.nonStriker = null;
             render();
             if(onDone) onDone();
           },
@@ -2079,6 +2107,11 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     addPlayerTeamABtn.classList.remove('active-team');
     addPlayerTeamBBtn.classList.remove('active-team');
     addPlayerInput.value = '';
+    if(addPlayerPreselectTeamKey){
+      addPlayerSelectedTeam = addPlayerPreselectTeamKey;
+      (addPlayerPreselectTeamKey === 'A' ? addPlayerTeamABtn : addPlayerTeamBBtn).classList.add('active-team');
+      addPlayerPreselectTeamKey = null;
+    }
     addPlayerOverlay.classList.remove('hidden');
     awaitingInput = true;
     updateButtonAvailability();
@@ -2089,7 +2122,10 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     updateButtonAvailability();
   }
   document.getElementById('addPlayerBtn').addEventListener('click', openAddPlayerModal);
-  document.getElementById('addPlayerCancel').addEventListener('click', closeAddPlayerModal);
+  document.getElementById('addPlayerCancel').addEventListener('click', function(){
+    bowlerPromptResume = null;
+    closeAddPlayerModal();
+  });
   addPlayerTeamABtn.addEventListener('click', function(){
     addPlayerSelectedTeam = 'A';
     addPlayerTeamABtn.classList.add('active-team');
@@ -2111,6 +2147,11 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     showToast(name + ' added to ' + team.name);
     closeAddPlayerModal();
     render();
+    if(bowlerPromptResume){
+      var resume = bowlerPromptResume;
+      bowlerPromptResume = null;
+      promptNextOverBowler(resume);
+    }
   });
 
   /* ================= Summary screen ================= */
