@@ -251,6 +251,19 @@
   .sb-batters .name.striker::after{content:" *"; color:var(--six-gold);}
   .sb-bowler{text-align:right; color:var(--chalk-dim);}
   .sb-bowler .name{color:var(--chalk);}
+  .sb-stats-btn{
+    align-self:center; flex-shrink:0;
+    width:30px; height:30px; border-radius:50%;
+    border:1px solid var(--board-line); background:transparent;
+    color:var(--chalk); font-size:14px; line-height:1;
+    display:flex; align-items:center; justify-content:center;
+    cursor:pointer; padding:0; margin:0 6px;
+  }
+  .sb-stats-btn:active{opacity:0.7;}
+  .stats-section{margin-bottom:12px;}
+  .stats-h{font-size:11px; letter-spacing:0.06em; color:var(--chalk-dim); margin-bottom:4px; text-transform:uppercase;}
+  .stats-row{display:flex; justify-content:space-between; font-size:13px; padding:3px 0; border-bottom:1px solid rgba(248,249,244,0.08);}
+  .stats-empty{font-size:13px; color:var(--chalk-dim);}
 
   .chase-row{
     margin-top:8px;
@@ -376,6 +389,8 @@
   }
   .btn-secondary.extra-btn{font-size:9.5px; letter-spacing:0.2px; line-height:1.2;}
   .btn-secondary.overthrow-btn{color:var(--ball-red); border-color:var(--ball-red); font-size:10px; letter-spacing:0.2px; line-height:1.2;}
+
+  .out-retire-row{display:grid; grid-template-columns:repeat(5, 1fr); gap:6px; margin-bottom:10px;}
 
   .btn-out{
     width:100%; height:60px; background:var(--ball-red); color:var(--chalk);
@@ -537,6 +552,7 @@
           <div><span class="name striker editable-name" id="strikerLine" title="Tap to fix name">-</span></div>
           <div><span class="name editable-name" id="nonStrikerLine" title="Tap to fix name">-</span></div>
         </div>
+        <button class="sb-stats-btn" id="statsBtn" title="Match stats">📊</button>
         <div class="sb-bowler">
           <div>Bowling</div>
           <div class="name editable-name" id="bowlerLine" title="Tap to fix name">-</div>
@@ -568,9 +584,9 @@
         <button class="btn btn-secondary overthrow-btn" id="overthrowBtn">OVER<br>THROW</button>
       </div>
 
-      <div class="primary-grid" style="grid-template-columns:1fr 1fr; margin-bottom:10px;">
-        <button class="btn btn-out" id="outBtn">OUT</button>
-        <button class="btn btn-util" id="retireBtn" style="border-color:var(--six-gold); color:var(--six-gold);">RETIRE</button>
+      <div class="out-retire-row">
+        <button class="btn btn-util" id="retireBtn" style="grid-column: span 2; height:60px; border-color:var(--six-gold); color:var(--six-gold);">RETIRE</button>
+        <button class="btn btn-out" id="outBtn" style="grid-column: span 3; width:auto; margin-bottom:0;">OUT</button>
       </div>
 
       <div class="util-row" style="grid-template-columns:1fr 1fr 1fr;">
@@ -700,6 +716,15 @@
       <button class="dismissal-btn" id="confirmYesBtn">Yes</button>
       <button class="dismissal-btn" id="confirmNoBtn">No</button>
     </div>
+  </div>
+</div>
+
+<!-- Quick stats popup -->
+<div class="modal-overlay hidden" id="statsOverlay">
+  <div class="modal-card" style="max-height:80vh; overflow-y:auto; text-align:left;">
+    <p class="modal-title">MATCH STATS</p>
+    <div id="statsContent"></div>
+    <button class="modal-cancel" id="statsCloseBtn">Close</button>
   </div>
 </div>
 
@@ -1753,8 +1778,24 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     showScreen('summary');
   }
 
+  function endInningsEarly(){
+    if(!inn || inn.finished) return;
+    snapshot();
+    inn.finished = true;
+    inn.resultText = inn.resultText || 'Innings ended early.';
+    render();
+  }
+
   document.getElementById('abandonBtn').addEventListener('click', function(){
-    if(confirm('End the match now and save the summary?')) finishMatch();
+    if(!inn || awaitingInput || inn.finished) return;
+    var isFirstInnings = inn.target === null;
+    openConfirm({
+      title: isFirstInnings ? 'END INNINGS?' : 'END MATCH?',
+      sub: isFirstInnings ? 'This ends the first innings now so you can move on to the second innings.' : 'This ends the match now and saves the final summary.',
+      yesLabel: isFirstInnings ? 'Yes, end innings' : 'Yes, end match',
+      noLabel: 'Cancel',
+      onYes: function(){ if(isFirstInnings) endInningsEarly(); else finishMatch(); }
+    });
   });
   document.getElementById('newMatchBtn').addEventListener('click', function(){
     resetSetupScreen();
@@ -1779,7 +1820,8 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     banner: document.getElementById('banner'),
     overList: document.getElementById('overList'),
     ballCountLabel: document.getElementById('ballCountLabel'),
-    postInningsActions: document.getElementById('postInningsActions')
+    postInningsActions: document.getElementById('postInningsActions'),
+    abandonBtn: document.getElementById('abandonBtn')
   };
 
   function renderMatchStatic(){
@@ -1817,6 +1859,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     if(!inn) return;
     persistActiveMatch();
     els.inningsLabel.textContent = (inn.target === null ? '1ST' : '2ND') + ' INNINGS';
+    els.abandonBtn.textContent = inn.target === null ? 'End innings' : 'End match';
     els.battingTeamLabel.textContent = battingTeam().name + ' batting';
     els.scoreRuns.textContent = inn.runs;
     els.scoreWkts.textContent = inn.wickets;
@@ -2027,8 +2070,74 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
       }
     });
   });
+  /* ---------- quick stats popup ---------- */
+  var statsOverlay = document.getElementById('statsOverlay');
+  var statsContent = document.getElementById('statsContent');
+  function buildStatsHtml(){
+    var battersTeam = (inn.battingTeamKey==='A' ? match.teamA : match.teamB);
+    var battedNames = inn.battingOrderUsed.slice();
+    var yetToBat = battersTeam.players.filter(function(p){ return battedNames.indexOf(p) === -1; });
+    var html = '';
+
+    html += '<div class="stats-section"><div class="stats-h">Batted</div>';
+    if(battedNames.length === 0){ html += '<div class="stats-empty">No one yet</div>'; }
+    battedNames.forEach(function(name){
+      var s = inn.batStats[name] || {runs:0, balls:0, out:false, retired:false};
+      var tag = s.out ? 'out' : (s.retired ? 'retired' : 'not out');
+      html += '<div class="stats-row"><span>' + escapeHtml(name) + '</span><span>' + s.runs + '(' + s.balls + ') \u00b7 ' + tag + '</span></div>';
+    });
+    html += '</div>';
+
+    html += '<div class="stats-section"><div class="stats-h">Yet to bat</div>';
+    if(yetToBat.length === 0){ html += '<div class="stats-empty">No one left</div>'; }
+    yetToBat.forEach(function(name){ html += '<div class="stats-row"><span>' + escapeHtml(name) + '</span></div>'; });
+    html += '</div>';
+
+    var overs = groupOvers(inn.history);
+    var lastOver = overs.length ? overs[overs.length - 1] : [];
+    var legalCount = 0;
+    lastOver.forEach(function(b){ if(b.type==='run' || b.type==='wicket' || b.type==='overthrow') legalCount++; });
+    if(legalCount >= 6) lastOver = [];
+    html += '<div class="stats-section"><div class="stats-h">This over</div>';
+    html += '<div class="stats-row"><span>' + (lastOver.length ? lastOver.map(function(b){ return escapeHtml(b.label); }).join('  ') : 'No balls bowled yet') + '</span></div>';
+    html += '</div>';
+
+    html += '<div class="stats-section"><div class="stats-h">Bowling figures</div>';
+    var bowlerNames = Object.keys(inn.bowlStats);
+    if(bowlerNames.length === 0){ html += '<div class="stats-empty">No overs bowled yet</div>'; }
+    bowlerNames.forEach(function(name){
+      var s = inn.bowlStats[name];
+      html += '<div class="stats-row"><span>' + escapeHtml(name) + '</span><span>' + oversStr(s.balls) + ' ov \u00b7 ' + s.runs + ' r \u00b7 ' + s.wickets + ' w</span></div>';
+    });
+    html += '</div>';
+
+    return html;
+  }
+  document.getElementById('statsBtn').addEventListener('click', function(){
+    if(!inn || awaitingInput) return;
+    statsContent.innerHTML = buildStatsHtml();
+    statsOverlay.classList.remove('hidden');
+    awaitingInput = true;
+    updateButtonAvailability();
+  });
+  document.getElementById('statsCloseBtn').addEventListener('click', function(){
+    statsOverlay.classList.add('hidden');
+    awaitingInput = false;
+    updateButtonAvailability();
+  });
+
   document.getElementById('undoBtn').addEventListener('click', undo);
-  document.getElementById('swapStrikeBtn').addEventListener('click', swapStrike);
+  document.getElementById('swapStrikeBtn').addEventListener('click', function(){
+    if(!inn || inn.finished || awaitingInput) return;
+    if(!inn.striker || !inn.nonStriker){ showToast('No partner to swap with'); return; }
+    openConfirm({
+      title: 'SWAP STRIKE?',
+      sub: 'Swap ' + inn.striker + ' and ' + inn.nonStriker + '?',
+      yesLabel: 'Yes, swap',
+      noLabel: 'Cancel',
+      onYes: swapStrike
+    });
+  });
 
   /* ---------- overthrow modal ---------- */
   var overthrowOverlay = document.getElementById('overthrowOverlay');
@@ -2071,13 +2180,41 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     var exclude = [current];
     if(role === 'striker' && inn.nonStriker) exclude.push(inn.nonStriker);
     if(role === 'nonStriker' && inn.striker) exclude.push(inn.striker);
-    var options = team.players.filter(function(p){ return exclude.indexOf(p) === -1; });
+    var options = team.players.filter(function(p){
+      if(exclude.indexOf(p) !== -1) return false;
+      if(role !== 'bowler'){
+        var st = inn.batStats[p];
+        if(st && st.out) return false; // already dismissed - can't become the striker/non-striker
+      }
+      return true;
+    });
     openPicker({
       title: 'FIX ' + (role === 'bowler' ? 'BOWLER' : (role === 'striker' ? 'STRIKER' : 'NON-STRIKER')),
       sub: 'Currently "' + current + '" - pick the correct player, or type a new name below',
       options: options,
-      onPick: function(newName){ doRenamePlayer(role, current, newName); }
+      onPick: function(newName){
+        newName = (newName || '').trim();
+        if(!newName || newName === current) return;
+        if(role === 'bowler'){
+          doRenamePlayer(role, current, newName);
+        } else {
+          openConfirm({
+            title: 'CONFIRM CHANGE',
+            sub: 'This moves ' + current + '\u2019s runs and balls faced to ' + newName + '. Continue?',
+            yesLabel: 'Yes, change',
+            noLabel: 'Cancel',
+            onYes: function(){ doRenamePlayer(role, current, newName); }
+          });
+        }
+      }
     });
+  }
+  function bowlerContribution(ball){
+    if(ball.type === 'wide') return {balls:0, runs:1, wickets:0};
+    if(ball.type === 'noball') return {balls:0, runs: ball.runs, wickets:0};
+    if(ball.type === 'run' || ball.type === 'overthrow') return {balls:1, runs: ball.runs, wickets:0};
+    if(ball.type === 'wicket') return {balls:1, runs:0, wickets: (ball.dismissal && ball.dismissal.indexOf('Run Out') === 0) ? 0 : 1};
+    return {balls:0, runs:0, wickets:0};
   }
   function doRenamePlayer(role, oldName, newName){
     newName = (newName || '').trim();
@@ -2090,43 +2227,63 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
       return;
     }
     snapshot();
+
+    if(role === 'bowler'){
+      // Bowler correction only applies to the over in progress - earlier overs/figures under
+      // the old name are left untouched, since they were genuinely bowled by that player.
+      if(team.players.indexOf(newName) === -1) team.players.push(newName);
+      inn.bowler = newName;
+      var overs = groupOvers(inn.history);
+      var lastOver = overs.length ? overs[overs.length - 1] : [];
+      var legalCount = 0;
+      lastOver.forEach(function(b){ if(b.type==='run' || b.type==='wicket' || b.type==='overthrow') legalCount++; });
+      if(lastOver.length > 0 && legalCount < 6){
+        var migrated = {balls:0, runs:0, wickets:0};
+        lastOver.forEach(function(b){
+          if(b.bowler === oldName){
+            var c = bowlerContribution(b);
+            migrated.balls += c.balls; migrated.runs += c.runs; migrated.wickets += c.wickets;
+            b.bowler = newName;
+          }
+        });
+        if(inn.bowlStats[oldName]){
+          inn.bowlStats[oldName].balls -= migrated.balls;
+          inn.bowlStats[oldName].runs -= migrated.runs;
+          inn.bowlStats[oldName].wickets -= migrated.wickets;
+        }
+        var nbw = ensureBowlStat(newName);
+        nbw.balls += migrated.balls; nbw.runs += migrated.runs; nbw.wickets += migrated.wickets;
+      } else {
+        ensureBowlStat(newName);
+      }
+      rememberPlayers([newName]);
+      render();
+      showToast('This over now credited to ' + newName);
+      return;
+    }
+
     var idx = team.players.indexOf(oldName);
     if(team.players.indexOf(newName) === -1){
       if(idx !== -1) team.players[idx] = newName; else team.players.push(newName);
     }
-
-    if(role === 'bowler'){
-      inn.bowler = newName;
-      if(inn.bowlStats[oldName]){
-        if(inn.bowlStats[newName]){
-          var a = inn.bowlStats[oldName], b = inn.bowlStats[newName];
-          b.balls += a.balls; b.runs += a.runs; b.wickets += a.wickets;
-        } else {
-          inn.bowlStats[newName] = inn.bowlStats[oldName];
-        }
-        delete inn.bowlStats[oldName];
+    if(role === 'striker') inn.striker = newName; else inn.nonStriker = newName;
+    if(inn.batStats[oldName]){
+      if(inn.batStats[newName]){
+        var x = inn.batStats[oldName], y = inn.batStats[newName];
+        y.runs += x.runs; y.balls += x.balls; y.fours += x.fours; y.sixes += x.sixes;
+        y.out = y.out || x.out; if(x.out && !y.dismissal) y.dismissal = x.dismissal;
+      } else {
+        inn.batStats[newName] = inn.batStats[oldName];
       }
-    } else {
-      if(role === 'striker') inn.striker = newName; else inn.nonStriker = newName;
-      if(inn.batStats[oldName]){
-        if(inn.batStats[newName]){
-          var x = inn.batStats[oldName], y = inn.batStats[newName];
-          y.runs += x.runs; y.balls += x.balls; y.fours += x.fours; y.sixes += x.sixes;
-          y.out = y.out || x.out; if(x.out && !y.dismissal) y.dismissal = x.dismissal;
-        } else {
-          inn.batStats[newName] = inn.batStats[oldName];
-        }
-        delete inn.batStats[oldName];
-      }
-      var boi = inn.battingOrderUsed.indexOf(oldName);
-      if(boi !== -1){
-        if(inn.battingOrderUsed.indexOf(newName) === -1) inn.battingOrderUsed[boi] = newName;
-        else inn.battingOrderUsed.splice(boi,1);
-      }
+      delete inn.batStats[oldName];
+    }
+    var boi = inn.battingOrderUsed.indexOf(oldName);
+    if(boi !== -1){
+      if(inn.battingOrderUsed.indexOf(newName) === -1) inn.battingOrderUsed[boi] = newName;
+      else inn.battingOrderUsed.splice(boi,1);
     }
     inn.history.forEach(function(b){
       if(b.batter === oldName) b.batter = newName;
-      if(b.bowler === oldName) b.bowler = newName;
       if(b.fielder === oldName) b.fielder = newName;
     });
     rememberPlayers([newName]);
