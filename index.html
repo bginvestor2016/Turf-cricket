@@ -570,9 +570,10 @@
 
       <button class="btn btn-out" id="outBtn">OUT</button>
 
-      <div class="util-row">
-        <button class="btn btn-util" id="undoBtn">↺ Undo</button>
-        <button class="btn btn-util" id="abandonBtn">End match</button>
+      <div class="util-row" style="grid-template-columns:1fr 1fr 1fr;">
+        <button class="btn btn-util" id="undoBtn" style="font-size:12px;">↺ Undo</button>
+        <button class="btn btn-util" id="swapStrikeBtn" style="font-size:12px;" title="Swap who's on strike">⇄ Swap</button>
+        <button class="btn btn-util" id="abandonBtn" style="font-size:12px;">End match</button>
       </div>
       <button class="btn-block ghost" id="addPlayerBtn" style="margin-top:8px;">+ Add player to squad</button>
     </div>
@@ -1181,6 +1182,9 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     name = (name||'').trim();
     if(!name) return;
     if(setupTeams[teamKey].players.indexOf(name) !== -1){ showToast(name+' already added'); return; }
+    var otherKey = teamKey === 'A' ? 'B' : 'A';
+    var otherHas = setupTeams[otherKey].players.some(function(p){ return p.toLowerCase() === name.toLowerCase(); });
+    if(otherHas){ showToast(name+' is already in the other squad'); return; }
     setupTeams[teamKey].players.push(name);
     renderChips(teamKey);
     renderRecentChips(teamKey);
@@ -1442,6 +1446,13 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
   function rotateStrike(){
     if(!inn.striker || !inn.nonStriker) return;
     var t = inn.striker; inn.striker = inn.nonStriker; inn.nonStriker = t;
+  }
+  function swapStrike(){
+    if(!inn || inn.finished || awaitingInput) return;
+    if(!inn.striker || !inn.nonStriker){ showToast('No partner to swap with'); return; }
+    var t = inn.striker; inn.striker = inn.nonStriker; inn.nonStriker = t;
+    render();
+    showToast('Strike swapped');
   }
 
   var bowlerPromptResume = null;
@@ -1990,6 +2001,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     });
   });
   document.getElementById('undoBtn').addEventListener('click', undo);
+  document.getElementById('swapStrikeBtn').addEventListener('click', swapStrike);
 
   /* ---------- overthrow modal ---------- */
   var overthrowOverlay = document.getElementById('overthrowOverlay');
@@ -2043,9 +2055,14 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
   function doRenamePlayer(role, oldName, newName){
     newName = (newName || '').trim();
     if(!newName || newName === oldName) return;
-    snapshot();
     var teamKey = role === 'bowler' ? (inn.battingTeamKey === 'A' ? 'B' : 'A') : inn.battingTeamKey;
     var team = teamKey === 'A' ? match.teamA : match.teamB;
+    var otherTeam = teamKey === 'A' ? match.teamB : match.teamA;
+    if(team.players.indexOf(newName) === -1 && otherTeam.players.some(function(p){ return p.toLowerCase() === newName.toLowerCase(); })){
+      showToast(newName + ' is already playing for ' + otherTeam.name);
+      return;
+    }
+    snapshot();
     var idx = team.players.indexOf(oldName);
     if(team.players.indexOf(newName) === -1){
       if(idx !== -1) team.players[idx] = newName; else team.players.push(newName);
@@ -2141,7 +2158,12 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     var name = addPlayerInput.value.trim();
     if(!name) return;
     var team = addPlayerSelectedTeam === 'A' ? match.teamA : match.teamB;
+    var otherTeam = addPlayerSelectedTeam === 'A' ? match.teamB : match.teamA;
     if(team.players.indexOf(name) !== -1){ showToast(name + ' already in squad'); return; }
+    if(otherTeam.players.some(function(p){ return p.toLowerCase() === name.toLowerCase(); })){
+      showToast(name + ' is already playing for ' + otherTeam.name);
+      return;
+    }
     team.players.push(name);
     rememberPlayers([name]);
     showToast(name + ' added to ' + team.name);
