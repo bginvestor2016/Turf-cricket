@@ -1512,7 +1512,11 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
   function maybePromptNextBatsman(onDone, slot){
     slot = slot || 'striker';
     var battersTeam = (inn.battingTeamKey==='A' ? match.teamA : match.teamB);
-    var remaining = battersTeam.players.filter(function(p){ return inn.battingOrderUsed.indexOf(p) === -1; });
+    var remaining = battersTeam.players.filter(function(p){
+      if(inn.battingOrderUsed.indexOf(p) === -1) return true;
+      var rs = inn.batStats[p];
+      return !!(rs && rs.retired);
+    });
     if(inn.finished){ if(onDone) onDone(); return; }
     if(remaining.length === 0){
       var otherSlot = slot === 'striker' ? 'nonStriker' : 'striker';
@@ -1550,7 +1554,10 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
       sub: battersTeam.name + ' - who is coming in?',
       options: remaining,
       onPick: function(name){
-        inn[slot] = name; ensureBatStat(name); inn.battingOrderUsed.push(name);
+        inn[slot] = name;
+        var bs = ensureBatStat(name);
+        bs.retired = false;
+        if(inn.battingOrderUsed.indexOf(name) === -1) inn.battingOrderUsed.push(name);
         render();
         if(onDone) onDone();
       }
@@ -1640,10 +1647,13 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
       label: isRetirement ? 'REH' : 'W',
       batter: outPlayer, bowler: inn.bowler, dismissal: dismissalText, fielder: fielder || null
     });
-    inn.wickets += 1;
     var bs = ensureBatStat(outPlayer);
-    bs.out = true; bs.dismissal = dismissalText;
-    if(!isRetirement){
+    bs.dismissal = dismissalText;
+    if(isRetirement){
+      bs.retired = true;
+    } else {
+      inn.wickets += 1;
+      bs.out = true;
       inn.balls += 1;
       bs.balls += 1;
       var bw = ensureBowlStat(inn.bowler);
