@@ -568,7 +568,10 @@
         <button class="btn btn-secondary overthrow-btn" id="overthrowBtn">OVER<br>THROW</button>
       </div>
 
-      <button class="btn btn-out" id="outBtn">OUT</button>
+      <div class="primary-grid" style="grid-template-columns:1fr 1fr; margin-bottom:10px;">
+        <button class="btn btn-out" id="outBtn">OUT</button>
+        <button class="btn btn-util" id="retireBtn" style="border-color:var(--six-gold); color:var(--six-gold);">RETIRE</button>
+      </div>
 
       <div class="util-row" style="grid-template-columns:1fr 1fr 1fr;">
         <button class="btn btn-util" id="undoBtn" style="font-size:12px;">↺ Undo</button>
@@ -608,7 +611,6 @@
       <button class="dismissal-btn" data-d="Caught">Caught</button>
       <button class="dismissal-btn" data-d="Run Out">Run out</button>
       <button class="dismissal-btn" data-d="Stumped">Stumped</button>
-      <button class="dismissal-btn" data-d="Retired Out">Retired out</button>
       <button class="dismissal-btn" data-d="Other">Other</button>
     </div>
     <button class="modal-cancel" id="modalCancel">Cancel</button>
@@ -1512,11 +1514,12 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
   function maybePromptNextBatsman(onDone, slot){
     slot = slot || 'striker';
     var battersTeam = (inn.battingTeamKey==='A' ? match.teamA : match.teamB);
-    var remaining = battersTeam.players.filter(function(p){
-      if(inn.battingOrderUsed.indexOf(p) === -1) return true;
+    var freshPlayers = battersTeam.players.filter(function(p){ return inn.battingOrderUsed.indexOf(p) === -1; });
+    var retiredPlayers = battersTeam.players.filter(function(p){
       var rs = inn.batStats[p];
-      return !!(rs && rs.retired);
+      return inn.battingOrderUsed.indexOf(p) !== -1 && rs && rs.retired;
     });
+    var remaining = freshPlayers.length > 0 ? freshPlayers : retiredPlayers;
     if(inn.finished){ if(onDone) onDone(); return; }
     if(remaining.length === 0){
       var otherSlot = slot === 'striker' ? 'nonStriker' : 'striker';
@@ -1686,7 +1689,8 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
       teamName: battingTeam().name,
       runs: inn.runs, wickets: inn.wickets, balls: inn.balls,
       fours: inn.fours, sixes: inn.sixes,
-      batStats: inn.batStats, bowlStats: inn.bowlStats
+      batStats: inn.batStats, bowlStats: inn.bowlStats,
+      history: inn.history
     };
   }
 
@@ -1805,7 +1809,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
   }
 
   function updateButtonAvailability(){
-    var buttons = document.querySelectorAll('.primary-grid .btn, .secondary-grid .btn, #outBtn');
+    var buttons = document.querySelectorAll('.primary-grid .btn, .secondary-grid .btn, #outBtn, #retireBtn');
     buttons.forEach(function(b){ b.disabled = !!(inn && inn.finished) || awaitingInput; });
   }
 
@@ -1972,6 +1976,19 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
   }
   document.getElementById('outBtn').addEventListener('click', openModal);
   document.getElementById('modalCancel').addEventListener('click', closeModal);
+  document.getElementById('retireBtn').addEventListener('click', function(){
+    if(!inn || inn.finished || awaitingInput) return;
+    if(inn.striker && inn.nonStriker){
+      openPicker({
+        title: 'WHO IS RETIRING?',
+        sub: 'Striker: ' + inn.striker + '  |  Non-striker: ' + inn.nonStriker,
+        options: [inn.striker, inn.nonStriker],
+        onPick: function(name){ confirmOut('Retired Out', null, name); }
+      });
+    } else if(inn.striker || inn.nonStriker){
+      confirmOut('Retired Out', null, inn.striker || inn.nonStriker);
+    }
+  });
   document.getElementById('dismissalGrid').querySelectorAll('.dismissal-btn').forEach(function(btn){
     btn.addEventListener('click', function(){
       var d = btn.getAttribute('data-d');
@@ -2208,6 +2225,45 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
       '<table class="stat-table"><tr><th>Bowler</th><th>O</th><th>R</th><th>W</th><th>Econ</th></tr>'+rows+'</table></div>';
   }
 
+  function bestBatterOf(inningsData){
+    if(!inningsData) return null;
+    var best = null;
+    Object.keys(inningsData.batStats).forEach(function(name){
+      var s = inningsData.batStats[name];
+      if(!best || s.runs > best.runs || (s.runs === best.runs && s.balls < best.balls)){
+        best = {name:name, runs:s.runs, balls:s.balls};
+      }
+    });
+    return best;
+  }
+  function bestBowlerOf(inningsData){
+    if(!inningsData) return null;
+    var best = null;
+    Object.keys(inningsData.bowlStats).forEach(function(name){
+      var s = inningsData.bowlStats[name];
+      var econ = s.balls>0 ? (s.runs/(s.balls/6)) : 0;
+      if(!best || s.wickets > best.wickets || (s.wickets === best.wickets && econ < best.econ)){
+        best = {name:name, wickets:s.wickets, runs:s.runs, balls:s.balls, econ:econ};
+      }
+    });
+    return best;
+  }
+  function bestPerformersHtml(record){
+    var teamABatting = (record.innings1 && record.innings1.battingTeamKey==='A') ? record.innings1 : ((record.innings2 && record.innings2.battingTeamKey==='A') ? record.innings2 : null);
+    var teamBBatting = (record.innings1 && record.innings1.battingTeamKey==='B') ? record.innings1 : ((record.innings2 && record.innings2.battingTeamKey==='B') ? record.innings2 : null);
+    var bestBatA = bestBatterOf(teamABatting);
+    var bestBatB = bestBatterOf(teamBBatting);
+    var bestBowlA = bestBowlerOf(teamBBatting);
+    var bestBowlB = bestBowlerOf(teamABatting);
+    function batCell(b){ return b ? escapeHtml(b.name) + ' - ' + b.runs + '(' + b.balls + ')' : '-'; }
+    function bowlCell(b){ return b ? escapeHtml(b.name) + ' - ' + b.wickets + '/' + b.runs : '-'; }
+    return '<div class="panel"><div class="panel-title">BEST PERFORMERS</div>' +
+      '<table class="stat-table"><tr><th>Team</th><th>Best Batter</th><th>Best Bowler</th></tr>' +
+      '<tr><td>'+escapeHtml(record.teamA)+'</td><td>'+batCell(bestBatA)+'</td><td>'+bowlCell(bestBowlA)+'</td></tr>' +
+      '<tr><td>'+escapeHtml(record.teamB)+'</td><td>'+batCell(bestBatB)+'</td><td>'+bowlCell(bestBowlB)+'</td></tr>' +
+      '</table></div>';
+  }
+
   var currentSummaryRecord = null;
   function renderSummaryScreen(record){
     currentSummaryRecord = record;
@@ -2216,6 +2272,8 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     if(record.innings1) html += '<br>' + escapeHtml(record.innings1.teamName) + ': ' + record.innings1.runs + '/' + record.innings1.wickets + ' (' + oversStr(record.innings1.balls) + ')';
     if(record.innings2) html += '<br>' + escapeHtml(record.innings2.teamName) + ': ' + record.innings2.runs + '/' + record.innings2.wickets + ' (' + oversStr(record.innings2.balls) + ')';
     html += '</div></div>';
+
+    html += bestPerformersHtml(record);
 
     if(record.innings1){
       html += battingCardHtml(record.innings1);
@@ -2252,6 +2310,16 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     doc.setTextColor(0,0,0);
     doc.setFont('helvetica','bold'); doc.setFontSize(13);
     doc.text(record.resultText || '', marginX, y); y += 22;
+
+    var teamABattingPdf = (record.innings1 && record.innings1.battingTeamKey==='A') ? record.innings1 : ((record.innings2 && record.innings2.battingTeamKey==='A') ? record.innings2 : null);
+    var teamBBattingPdf = (record.innings1 && record.innings1.battingTeamKey==='B') ? record.innings1 : ((record.innings2 && record.innings2.battingTeamKey==='B') ? record.innings2 : null);
+    var bBatA = bestBatterOf(teamABattingPdf), bBatB = bestBatterOf(teamBBattingPdf);
+    var bBowlA = bestBowlerOf(teamBBattingPdf), bBowlB = bestBowlerOf(teamABattingPdf);
+    doc.setFont('helvetica','bold'); doc.setFontSize(10);
+    doc.text('BEST PERFORMERS', marginX, y); y += 14;
+    doc.setFont('helvetica','normal'); doc.setFontSize(9);
+    doc.text(record.teamA + ':  Bat - ' + (bBatA ? bBatA.name+' '+bBatA.runs+'('+bBatA.balls+')' : '-') + '   Bowl - ' + (bBowlA ? bBowlA.name+' '+bBowlA.wickets+'/'+bBowlA.runs : '-'), marginX, y); y += 13;
+    doc.text(record.teamB + ':  Bat - ' + (bBatB ? bBatB.name+' '+bBatB.runs+'('+bBatB.balls+')' : '-') + '   Bowl - ' + (bBowlB ? bBowlB.name+' '+bBowlB.wickets+'/'+bBowlB.runs : '-'), marginX, y); y += 20;
 
     function drawInnings(inningsData, bowlingTeamName){
       if(!inningsData) return;
@@ -2307,6 +2375,36 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
 
     if(record.innings1) drawInnings(record.innings1, record.innings1.battingTeamKey==='A' ? record.teamB : record.teamA);
     if(record.innings2) drawInnings(record.innings2, record.innings2.battingTeamKey==='A' ? record.teamB : record.teamA);
+
+    function ballLabelForPdf(b){
+      var s = b.label;
+      if(b.type === 'wicket') s += '[' + (b.batter||'') + (b.dismissal ? ' ' + b.dismissal : '') + ']';
+      else if(b.type === 'retired') s += '[' + (b.batter||'') + ']';
+      return s;
+    }
+    function drawOverByOver(inningsData){
+      if(!inningsData || !inningsData.history || !inningsData.history.length) return;
+      ensureSpace(30);
+      doc.setFont('helvetica','bold'); doc.setFontSize(12);
+      doc.text(inningsData.teamName + ' - OVER BY OVER', marginX, y); y += 16;
+      doc.setFont('helvetica','normal'); doc.setFontSize(9);
+      var overs = groupOvers(inningsData.history);
+      overs.forEach(function(overBalls, idx){
+        var overBowler = '';
+        for(var k=0;k<overBalls.length;k++){ if(overBalls[k].bowler){ overBowler = overBalls[k].bowler; break; } }
+        var ballsText = overBalls.map(ballLabelForPdf).join('  ');
+        var line = 'Over ' + (idx+1) + (overBowler ? ' (' + overBowler + ')' : '') + ':  ' + ballsText;
+        var wrapped = doc.splitTextToSize(line, pageW - marginX*2);
+        wrapped.forEach(function(wline){
+          ensureSpace(12);
+          doc.text(wline, marginX, y);
+          y += 12;
+        });
+      });
+      y += 12;
+    }
+    drawOverByOver(record.innings1);
+    drawOverByOver(record.innings2);
 
     var fileName = 'scorecard-' + (record.teamA||'A').replace(/[^a-z0-9]/gi,'') + '-vs-' + (record.teamB||'B').replace(/[^a-z0-9]/gi,'') + '.pdf';
     try{
