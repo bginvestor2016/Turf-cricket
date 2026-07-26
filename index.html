@@ -468,9 +468,17 @@
     background:rgba(16,19,15,0.35); border:1px solid rgba(248,249,244,0.18);
     border-radius:12px; padding:12px 14px; margin-bottom:10px; cursor:pointer;
   }
-  .history-card .hc-teams{font-weight:600; font-size:14.5px;}
+  .history-card .hc-teams{font-weight:600; font-size:14.5px; padding-right:30px;}
   .history-card .hc-meta{font-size:12px; color:var(--chalk-dim); margin-top:3px;}
   .history-card .hc-result{font-size:12.5px; color:var(--six-gold); margin-top:4px;}
+  .history-delete-btn{
+    position:absolute; top:10px; right:10px;
+    width:26px; height:26px; border-radius:50%;
+    border:1px solid rgba(248,249,244,0.18); background:transparent;
+    color:var(--chalk-dim); font-size:13px; line-height:1;
+    display:flex; align-items:center; justify-content:center; padding:0; cursor:pointer;
+  }
+  .history-delete-btn:active{opacity:0.7;}
 
   ::-webkit-scrollbar{height:4px; width:4px;}
   ::-webkit-scrollbar-thumb{background:rgba(248,249,244,0.2); border-radius:4px;}
@@ -609,6 +617,11 @@
   <!-- ============ HISTORY SCREEN ============ -->
   <div id="screenHistory" style="display:none;">
     <div class="eyebrow">MATCH HISTORY</div>
+    <div class="history-actions" style="display:flex; gap:8px; margin-bottom:12px;">
+      <button class="btn-block ghost" id="exportHistoryBtn" style="margin-bottom:0; width:auto; flex:1;">⬇ Backup all</button>
+      <button class="btn-block ghost" id="importHistoryBtn" style="margin-bottom:0; width:auto; flex:1;">⬆ Restore backup</button>
+      <input type="file" id="importHistoryFile" accept="application/json" style="display:none;">
+    </div>
     <div id="historyList"></div>
     <button class="btn-block ghost" id="backFromHistoryBtn">← Back</button>
   </div>
@@ -2180,6 +2193,16 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     var exclude = [current];
     if(role === 'striker' && inn.nonStriker) exclude.push(inn.nonStriker);
     if(role === 'nonStriker' && inn.striker) exclude.push(inn.striker);
+    if(role === 'bowler'){
+      var overs = groupOvers(inn.history);
+      var curIdx = overs.length - 1;
+      if(curIdx > 0){
+        var prevOverBalls = overs[curIdx - 1];
+        for(var i=0;i<prevOverBalls.length;i++){
+          if(prevOverBalls[i].bowler){ exclude.push(prevOverBalls[i].bowler); break; }
+        }
+      }
+    }
     var options = team.players.filter(function(p){
       if(exclude.indexOf(p) !== -1) return false;
       if(role !== 'bowler'){
@@ -2591,20 +2614,90 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     box.innerHTML = matchHistory.map(function(rec, idx){
       var d = new Date(rec.date);
       var dateStr = d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
-      return '<div class="history-card" data-idx="'+idx+'">'+
+      return '<div class="history-card" data-idx="'+idx+'" style="position:relative;">'+
+        '<button class="history-delete-btn" data-idx="'+idx+'" title="Delete match">🗑</button>'+
         '<div class="hc-teams">'+escapeHtml(rec.teamA)+' vs '+escapeHtml(rec.teamB)+'</div>'+
         '<div class="hc-meta">'+dateStr+'</div>'+
         '<div class="hc-result">'+escapeHtml(rec.resultText)+'</div>'+
         '</div>';
     }).join('');
     box.querySelectorAll('.history-card').forEach(function(card){
-      card.addEventListener('click', function(){
+      card.addEventListener('click', function(e){
+        if(e.target.classList.contains('history-delete-btn')) return;
         var idx = parseInt(card.getAttribute('data-idx'),10);
         renderSummaryScreen(matchHistory[idx]);
         showScreen('summary');
       });
     });
+    box.querySelectorAll('.history-delete-btn').forEach(function(btn){
+      btn.addEventListener('click', function(e){
+        e.stopPropagation();
+        var idx = parseInt(btn.getAttribute('data-idx'),10);
+        var rec = matchHistory[idx];
+        openConfirm({
+          title: 'DELETE MATCH?',
+          sub: 'This permanently deletes ' + escapeHtml(rec.teamA) + ' vs ' + escapeHtml(rec.teamB) + ' from history.',
+          yesLabel: 'Yes, delete',
+          noLabel: 'Cancel',
+          onYes: function(){
+            matchHistory.splice(idx,1);
+            safeSet('match-history', matchHistory);
+            renderHistoryScreen();
+            showToast('Match deleted');
+          }
+        });
+      });
+    });
   }
+
+  document.getElementById('exportHistoryBtn').addEventListener('click', function(){
+    if(matchHistory.length === 0){ showToast('No matches to back up'); return; }
+    var payload = {exportedAt: new Date().toISOString(), matchHistory: matchHistory, knownPlayers: knownPlayers};
+    var blob = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'turf-cricket-backup-' + new Date().toISOString().slice(0,10) + '.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 2000);
+    showToast('Backup file downloading - save it to Drive or wherever you like');
+  });
+
+  document.getElementById('importHistoryBtn').addEventListener('click', function(){
+    document.getElementById('importHistoryFile').click();
+  });
+  document.getElementById('importHistoryFile').addEventListener('change', function(e){
+    var file = e.target.files && e.target.files[0];
+    if(!file) return;
+    var reader = new FileReader();
+    reader.onload = function(){
+      try{
+        var data = JSON.parse(reader.result);
+        var incoming = Array.isArray(data) ? data : data.matchHistory;
+        if(!Array.isArray(incoming)) throw new Error('bad format');
+        openConfirm({
+          title: 'RESTORE BACKUP?',
+          sub: 'This adds ' + incoming.length + ' match(es) from the backup file to your existing history.',
+          yesLabel: 'Yes, restore',
+          noLabel: 'Cancel',
+          onYes: function(){
+            matchHistory = incoming.concat(matchHistory);
+            if(matchHistory.length > 200) matchHistory = matchHistory.slice(0,200);
+            safeSet('match-history', matchHistory);
+            if(data.knownPlayers && Array.isArray(data.knownPlayers)) rememberPlayers(data.knownPlayers);
+            renderHistoryScreen();
+            showToast('Backup restored');
+          }
+        });
+      }catch(err){
+        showToast('Could not read that backup file');
+      }
+      document.getElementById('importHistoryFile').value = '';
+    };
+    reader.readAsText(file);
+  });
 
   /* ================= Init ================= */
   async function init(){
