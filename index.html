@@ -1557,7 +1557,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
       var rs = inn.batStats[p];
       return inn.battingOrderUsed.indexOf(p) !== -1 && rs && rs.retired;
     });
-    var remaining = freshPlayers.length > 0 ? freshPlayers : retiredPlayers;
+    var remaining = freshPlayers.concat(retiredPlayers);
     if(inn.finished){ if(onDone) onDone(); return; }
     if(remaining.length === 0){
       var otherSlot = slot === 'striker' ? 'nonStriker' : 'striker';
@@ -1678,9 +1678,16 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     var slot = (outPlayer === inn.nonStriker) ? 'nonStriker' : 'striker';
     var isRetirement = (dismissal === 'Retired Out');
     var dismissalText = dismissal;
-    if(fielder){
-      if(dismissal === 'Caught') dismissalText = 'Caught by ' + fielder;
-      else if(dismissal === 'Run Out') dismissalText = 'Run Out (' + fielder + ')';
+    if(dismissal === 'Bowled'){
+      dismissalText = 'b ' + inn.bowler;
+    } else if(dismissal === 'Caught' && fielder){
+      dismissalText = 'c ' + fielder + ' b ' + inn.bowler;
+    } else if(dismissal === 'Stumped' && fielder){
+      dismissalText = 'st ' + fielder + ' b ' + inn.bowler;
+    } else if(dismissal === 'Run Out'){
+      dismissalText = 'run out' + (fielder ? ' (' + fielder + ')' : '');
+    } else if(dismissal === 'Retired Out'){
+      dismissalText = 'retired out';
     }
     inn.history.push({
       type: isRetirement ? 'retired' : 'wicket',
@@ -2075,6 +2082,13 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
         openPicker({
           title: 'CAUGHT BY',
           sub: 'Who took the catch?',
+          options: bowlingTeam().players,
+          onPick: function(fielderName){ confirmOut(d, fielderName); }
+        });
+      } else if(d === 'Stumped'){
+        openPicker({
+          title: 'STUMPED BY',
+          sub: 'Who effected the stumping?',
           options: bowlingTeam().players,
           onPick: function(fielderName){ confirmOut(d, fielderName); }
         });
@@ -2664,7 +2678,12 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     if(record.innings1) drawInnings(record.innings1, record.innings1.battingTeamKey==='A' ? record.teamB : record.teamA);
     if(record.innings2) drawInnings(record.innings2, record.innings2.battingTeamKey==='A' ? record.teamB : record.teamA);
 
-    // ---------- Over by over ----------
+    // ---------- Over by over (starts on a fresh page) ----------
+    if((record.innings1 && record.innings1.history && record.innings1.history.length) ||
+       (record.innings2 && record.innings2.history && record.innings2.history.length)){
+      doc.addPage();
+      y = 50;
+    }
     function ballLabelForPdf(b){
       var s = b.label;
       if(b.type === 'wicket') s += '[' + (b.batter||'') + (b.dismissal ? ' ' + b.dismissal : '') + ']';
