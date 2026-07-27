@@ -2195,11 +2195,18 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     if(role === 'nonStriker' && inn.striker) exclude.push(inn.striker);
     if(role === 'bowler'){
       var overs = groupOvers(inn.history);
-      var curIdx = overs.length - 1;
-      if(curIdx > 0){
-        var prevOverBalls = overs[curIdx - 1];
-        for(var i=0;i<prevOverBalls.length;i++){
-          if(prevOverBalls[i].bowler){ exclude.push(prevOverBalls[i].bowler); break; }
+      if(overs.length > 0){
+        var lastOverBalls = overs[overs.length - 1];
+        var legalInLast = 0;
+        lastOverBalls.forEach(function(b){ if(b.type==='run' || b.type==='wicket' || b.type==='overthrow') legalInLast++; });
+        // If the last over group is complete (6 legal balls), no ball has been bowled yet in the
+        // new over, so that completed over IS the "previous over". Otherwise it's still in
+        // progress, so the previous over is the one before it.
+        var refOverBalls = legalInLast >= 6 ? lastOverBalls : (overs.length > 1 ? overs[overs.length - 2] : null);
+        if(refOverBalls){
+          for(var i=0;i<refOverBalls.length;i++){
+            if(refOverBalls[i].bowler){ exclude.push(refOverBalls[i].bowler); break; }
+          }
         }
       }
     }
@@ -2473,89 +2480,191 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     var doc = new jsPDF({unit:'pt', format:'a4'});
     var pageW = doc.internal.pageSize.getWidth();
     var marginX = 40;
+    var contentW = pageW - marginX*2;
     var y = 50;
+
+    var COLORS = {
+      dark: [17,24,20],
+      band: [21,58,42],
+      gold: [200,150,45],
+      goldLight: [252,244,224],
+      zebra: [244,246,242],
+      line: [222,224,218],
+      teamA: [30,86,178],
+      teamB: [178,44,44],
+      grayText: [110,110,110]
+    };
 
     function ensureSpace(needed){
       var pageH = doc.internal.pageSize.getHeight();
       if(y + needed > pageH - 40){ doc.addPage(); y = 50; }
     }
+    function teamColor(key){ return key === 'A' ? COLORS.teamA : COLORS.teamB; }
 
-    doc.setFont('helvetica','bold'); doc.setFontSize(16);
-    doc.text('TURF CRICKET SCORECARD', marginX, y); y += 22;
-    doc.setFont('helvetica','normal'); doc.setFontSize(11);
-    doc.text(record.teamA + ' vs ' + record.teamB, marginX, y); y += 16;
+    // ---------- Header band ----------
+    doc.setFillColor(COLORS.band[0],COLORS.band[1],COLORS.band[2]);
+    doc.rect(0, 0, pageW, 92, 'F');
+    doc.setTextColor(255,255,255);
+    doc.setFont('helvetica','bold'); doc.setFontSize(19);
+    doc.text('MATCH SCORECARD', marginX, 38);
+    doc.setFont('helvetica','normal'); doc.setFontSize(12);
+    doc.text(record.teamA + '  vs  ' + record.teamB, marginX, 58);
     var d = new Date(record.date || Date.now());
-    doc.setTextColor(110,110,110);
-    doc.text(d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}), marginX, y); y += 18;
+    doc.setFontSize(9);
+    doc.setTextColor(225,225,225);
+    doc.text(d.toLocaleDateString() + ' \u00b7 ' + d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}), marginX, 76);
     doc.setTextColor(0,0,0);
-    doc.setFont('helvetica','bold'); doc.setFontSize(13);
-    doc.text(record.resultText || '', marginX, y); y += 22;
+    y = 112;
 
+    // ---------- Result banner ----------
+    ensureSpace(30);
+    doc.setFillColor(COLORS.goldLight[0],COLORS.goldLight[1],COLORS.goldLight[2]);
+    doc.rect(marginX, y-16, contentW, 26, 'F');
+    doc.setDrawColor(COLORS.gold[0],COLORS.gold[1],COLORS.gold[2]); doc.setLineWidth(1);
+    doc.rect(marginX, y-16, contentW, 26);
+    doc.setFont('helvetica','bold'); doc.setFontSize(12);
+    doc.setTextColor(COLORS.gold[0]-40,COLORS.gold[1]-60,COLORS.gold[2]-30);
+    doc.text(record.resultText || '', marginX + contentW/2, y+2, {align:'center'});
+    doc.setTextColor(0,0,0);
+    y += 30;
+
+    // ---------- Best performers ----------
     var teamABattingPdf = (record.innings1 && record.innings1.battingTeamKey==='A') ? record.innings1 : ((record.innings2 && record.innings2.battingTeamKey==='A') ? record.innings2 : null);
     var teamBBattingPdf = (record.innings1 && record.innings1.battingTeamKey==='B') ? record.innings1 : ((record.innings2 && record.innings2.battingTeamKey==='B') ? record.innings2 : null);
     var bBatA = bestBatterOf(teamABattingPdf), bBatB = bestBatterOf(teamBBattingPdf);
     var bBowlA = bestBowlerOf(teamBBattingPdf), bBowlB = bestBowlerOf(teamABattingPdf);
-    doc.setFont('helvetica','bold'); doc.setFontSize(10);
-    doc.text('BEST PERFORMERS', marginX, y); y += 14;
-    doc.setFont('helvetica','normal'); doc.setFontSize(9);
-    doc.text(record.teamA + ':  Bat - ' + (bBatA ? bBatA.name+' '+bBatA.runs+'('+bBatA.balls+')' : '-') + '   Bowl - ' + (bBowlA ? bBowlA.name+' '+bBowlA.wickets+'/'+bBowlA.runs : '-'), marginX, y); y += 13;
-    doc.text(record.teamB + ':  Bat - ' + (bBatB ? bBatB.name+' '+bBatB.runs+'('+bBatB.balls+')' : '-') + '   Bowl - ' + (bBowlB ? bBowlB.name+' '+bBowlB.wickets+'/'+bBowlB.runs : '-'), marginX, y); y += 20;
+
+    ensureSpace(58);
+    var bpBoxY = y;
+    doc.setDrawColor(COLORS.line[0],COLORS.line[1],COLORS.line[2]); doc.setLineWidth(0.7);
+    doc.rect(marginX, bpBoxY, contentW, 54);
+    doc.setLineWidth(0.7);
+    doc.line(marginX + contentW/2, bpBoxY, marginX + contentW/2, bpBoxY+54);
+    doc.setFont('helvetica','bold'); doc.setFontSize(9);
+    doc.setTextColor(COLORS.teamA[0],COLORS.teamA[1],COLORS.teamA[2]);
+    doc.text(record.teamA.toUpperCase() + ' - BEST PERFORMERS', marginX+10, bpBoxY+16);
+    doc.setTextColor(COLORS.teamB[0],COLORS.teamB[1],COLORS.teamB[2]);
+    doc.text(record.teamB.toUpperCase() + ' - BEST PERFORMERS', marginX + contentW/2 + 10, bpBoxY+16);
+    doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(30,30,30);
+    doc.text('Bat: ' + (bBatA ? bBatA.name+' - '+bBatA.runs+'('+bBatA.balls+')' : '-'), marginX+10, bpBoxY+31);
+    doc.text('Bowl: ' + (bBowlA ? bBowlA.name+' - '+bBowlA.wickets+'/'+bBowlA.runs : '-'), marginX+10, bpBoxY+45);
+    doc.text('Bat: ' + (bBatB ? bBatB.name+' - '+bBatB.runs+'('+bBatB.balls+')' : '-'), marginX + contentW/2 + 10, bpBoxY+31);
+    doc.text('Bowl: ' + (bBowlB ? bBowlB.name+' - '+bBowlB.wickets+'/'+bBowlB.runs : '-'), marginX + contentW/2 + 10, bpBoxY+45);
+    y = bpBoxY + 54 + 22;
+
+    // ---------- Generic table drawer ----------
+    function drawTable(x, colWidths, headers, rows, opts){
+      opts = opts || {};
+      var rowH = opts.rowHeight || 17;
+      var headerBg = opts.headerBg || COLORS.band;
+      var totalW = colWidths.reduce(function(a,b){ return a+b; }, 0);
+      ensureSpace(rowH + 6);
+      doc.setFillColor(headerBg[0],headerBg[1],headerBg[2]);
+      doc.rect(x, y, totalW, rowH, 'F');
+      doc.setTextColor(255,255,255);
+      doc.setFont('helvetica','bold'); doc.setFontSize(9);
+      var cx = x;
+      headers.forEach(function(h, i){
+        var align = i===0 ? 'left' : 'right';
+        var tx = align==='left' ? cx+6 : cx+colWidths[i]-6;
+        doc.text(h, tx, y+rowH-5, {align: align});
+        cx += colWidths[i];
+      });
+      y += rowH;
+      doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(30,30,30);
+      rows.forEach(function(row, ri){
+        ensureSpace(rowH + 6);
+        if(opts.zebra !== false && ri % 2 === 1){
+          doc.setFillColor(COLORS.zebra[0],COLORS.zebra[1],COLORS.zebra[2]);
+          doc.rect(x, y, totalW, rowH, 'F');
+        }
+        var cx2 = x;
+        row.forEach(function(cell, ci){
+          var align = ci===0 ? 'left' : 'right';
+          var tx = align==='left' ? cx2+6 : cx2+colWidths[ci]-6;
+          doc.text(String(cell), tx, y+rowH-5, {align: align, maxWidth: colWidths[ci]-10});
+          cx2 += colWidths[ci];
+        });
+        doc.setDrawColor(COLORS.line[0],COLORS.line[1],COLORS.line[2]); doc.setLineWidth(0.4);
+        doc.line(x, y+rowH, x+totalW, y+rowH);
+        y += rowH;
+      });
+      y += 12;
+    }
+
+    function fallOfWicketsText(inningsData){
+      if(!inningsData || !inningsData.history) return '';
+      var runs = 0, wkt = 0, legalBalls = 0, parts = [];
+      inningsData.history.forEach(function(b){
+        runs += b.runs || 0;
+        if(b.type==='run' || b.type==='wicket' || b.type==='overthrow') legalBalls++;
+        if(b.type==='wicket'){
+          wkt++;
+          parts.push(wkt+'-'+runs+' (' + (b.batter||'?') + ', ' + oversStr(legalBalls) + ')');
+        }
+      });
+      return parts.join('   ');
+    }
 
     function drawInnings(inningsData, bowlingTeamName){
       if(!inningsData) return;
-      ensureSpace(30);
+      var accent = teamColor(inningsData.battingTeamKey);
+      ensureSpace(34);
+      doc.setFillColor(accent[0],accent[1],accent[2]);
+      doc.rect(marginX, y, contentW, 26, 'F');
+      doc.setTextColor(255,255,255);
       doc.setFont('helvetica','bold'); doc.setFontSize(12);
-      doc.text(inningsData.teamName + ' - ' + inningsData.runs + '/' + inningsData.wickets + ' (' + oversStr(inningsData.balls) + ' ov)', marginX, y);
-      y += 18;
+      doc.text(inningsData.teamName, marginX+8, y+17);
+      doc.text(inningsData.runs + '/' + inningsData.wickets + '  (' + oversStr(inningsData.balls) + ' ov)', marginX+contentW-8, y+17, {align:'right'});
+      doc.setTextColor(0,0,0);
+      y += 26 + 12;
 
-      var batCols = [marginX, marginX+170, marginX+210, marginX+250, marginX+285, marginX+320];
-      ensureSpace(16);
-      doc.setFont('helvetica','bold'); doc.setFontSize(9);
-      ['Batter','R','B','4s','6s','SR'].forEach(function(h, i){ doc.text(h, batCols[i], y); });
-      y += 6;
-      doc.setLineWidth(0.5); doc.line(marginX, y, marginX+355, y); y += 12;
-      doc.setFont('helvetica','normal');
-      Object.keys(inningsData.batStats).forEach(function(name){
-        ensureSpace(14);
+      var batHeaders = ['Batter','Dismissal','R','B','4s','6s','SR'];
+      var batColW = [125, 150, 30, 30, 30, 30, 45];
+      var batRows = Object.keys(inningsData.batStats).map(function(name){
         var s = inningsData.batStats[name];
         var sr = s.balls>0 ? ((s.runs/s.balls)*100).toFixed(1) : '0.0';
-        var label = name + (s.out ? '' : ' *') + (s.dismissal ? '  (' + s.dismissal + ')' : (s.out ? '' : ''));
-        doc.text(label, batCols[0], y, {maxWidth:165});
-        doc.text(String(s.runs), batCols[1], y);
-        doc.text(String(s.balls), batCols[2], y);
-        doc.text(String(s.fours), batCols[3], y);
-        doc.text(String(s.sixes), batCols[4], y);
-        doc.text(sr, batCols[5], y);
-        y += 14;
+        var nameLabel = name + (s.out ? '' : ' *');
+        var dismissal = s.out ? (s.dismissal || 'out') : (s.retired ? 'retired' : 'not out');
+        return [nameLabel, dismissal, s.runs, s.balls, s.fours, s.sixes, sr];
       });
-      y += 8;
+      drawTable(marginX, batColW, batHeaders, batRows, {headerBg: accent});
 
-      ensureSpace(16);
-      doc.setFont('helvetica','bold'); doc.setFontSize(10);
-      doc.text(bowlingTeamName + ' bowling', marginX, y); y += 14;
-      var bowlCols = [marginX, marginX+150, marginX+195, marginX+235, marginX+275];
-      doc.setFontSize(9);
-      ['Bowler','O','R','W','Econ'].forEach(function(h, i){ doc.text(h, bowlCols[i], y); });
-      y += 6;
-      doc.line(marginX, y, marginX+330, y); y += 12;
-      doc.setFont('helvetica','normal');
-      Object.keys(inningsData.bowlStats).forEach(function(name){
-        ensureSpace(14);
+      var fow = fallOfWicketsText(inningsData);
+      if(fow){
+        ensureSpace(24);
+        doc.setFont('helvetica','bold'); doc.setFontSize(8.5); doc.setTextColor(90,90,90);
+        doc.text('FALL OF WICKETS:', marginX, y);
+        y += 12;
+        doc.setFont('helvetica','normal');
+        var wrapped = doc.splitTextToSize(fow, contentW);
+        wrapped.forEach(function(line){
+          ensureSpace(12);
+          doc.text(line, marginX, y);
+          y += 12;
+        });
+        doc.setTextColor(0,0,0);
+        y += 8;
+      }
+
+      ensureSpace(20);
+      doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(30,30,30);
+      doc.text(bowlingTeamName + ' - Bowling', marginX, y); y += 10;
+
+      var bowlHeaders = ['Bowler','O','R','W','Econ'];
+      var bowlColW = [180, 60, 60, 60, 80];
+      var bowlRows = Object.keys(inningsData.bowlStats).map(function(name){
         var s = inningsData.bowlStats[name];
         var econ = s.balls>0 ? (s.runs/(s.balls/6)).toFixed(2) : '0.00';
-        doc.text(name, bowlCols[0], y, {maxWidth:145});
-        doc.text(oversStr(s.balls), bowlCols[1], y);
-        doc.text(String(s.runs), bowlCols[2], y);
-        doc.text(String(s.wickets), bowlCols[3], y);
-        doc.text(econ, bowlCols[4], y);
-        y += 14;
+        return [name, oversStr(s.balls), s.runs, s.wickets, econ];
       });
-      y += 18;
+      drawTable(marginX, bowlColW, bowlHeaders, bowlRows, {headerBg: [70,70,70]});
     }
 
     if(record.innings1) drawInnings(record.innings1, record.innings1.battingTeamKey==='A' ? record.teamB : record.teamA);
     if(record.innings2) drawInnings(record.innings2, record.innings2.battingTeamKey==='A' ? record.teamB : record.teamA);
 
+    // ---------- Over by over ----------
     function ballLabelForPdf(b){
       var s = b.label;
       if(b.type === 'wicket') s += '[' + (b.batter||'') + (b.dismissal ? ' ' + b.dismissal : '') + ']';
@@ -2564,9 +2673,15 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     }
     function drawOverByOver(inningsData){
       if(!inningsData || !inningsData.history || !inningsData.history.length) return;
+      var accent = teamColor(inningsData.battingTeamKey);
       ensureSpace(30);
-      doc.setFont('helvetica','bold'); doc.setFontSize(12);
-      doc.text(inningsData.teamName + ' - OVER BY OVER', marginX, y); y += 16;
+      doc.setFillColor(accent[0],accent[1],accent[2]);
+      doc.rect(marginX, y, contentW, 22, 'F');
+      doc.setTextColor(255,255,255);
+      doc.setFont('helvetica','bold'); doc.setFontSize(11);
+      doc.text(inningsData.teamName + ' - OVER BY OVER', marginX+8, y+15);
+      doc.setTextColor(0,0,0);
+      y += 22 + 10;
       doc.setFont('helvetica','normal'); doc.setFontSize(9);
       var overs = groupOvers(inningsData.history);
       overs.forEach(function(overBalls, idx){
@@ -2574,14 +2689,18 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
         for(var k=0;k<overBalls.length;k++){ if(overBalls[k].bowler){ overBowler = overBalls[k].bowler; break; } }
         var ballsText = overBalls.map(ballLabelForPdf).join('  ');
         var line = 'Over ' + (idx+1) + (overBowler ? ' (' + overBowler + ')' : '') + ':  ' + ballsText;
-        var wrapped = doc.splitTextToSize(line, pageW - marginX*2);
+        var wrapped = doc.splitTextToSize(line, contentW);
+        ensureSpace(12 * wrapped.length + 4);
+        if(idx % 2 === 1){
+          doc.setFillColor(COLORS.zebra[0],COLORS.zebra[1],COLORS.zebra[2]);
+          doc.rect(marginX, y-10, contentW, 12*wrapped.length, 'F');
+        }
         wrapped.forEach(function(wline){
-          ensureSpace(12);
-          doc.text(wline, marginX, y);
+          doc.text(wline, marginX+4, y);
           y += 12;
         });
       });
-      y += 12;
+      y += 14;
     }
     drawOverByOver(record.innings1);
     drawOverByOver(record.innings2);
